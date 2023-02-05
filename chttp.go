@@ -13,21 +13,32 @@ import (
 
 // NewWithTransport inits the HTTP client with cookies.  It allows to use
 // the custom Transport.
-func NewWithTransport(cookieDomain string, cookies []*http.Cookie, rt http.RoundTripper) *http.Client {
-	jar, _ := cookiejar.New(&cookiejar.Options{PublicSuffixList: publicsuffix.List})
+func NewWithTransport(cookieDomain string, cookies []*http.Cookie, rt http.RoundTripper) (*http.Client, error) {
+	jar, err := cookiejar.New(&cookiejar.Options{PublicSuffixList: publicsuffix.List})
+	if err != nil {
+		return nil, err
+	}
 	url, err := url.Parse(cookieDomain)
 	if err != nil {
-		panic(err) //shouldn't happen
+		return nil, err
 	}
 	jar.SetCookies(url, cookies)
-	cl := http.Client{
+	cl := &http.Client{
 		Jar:       jar,
 		Transport: rt,
 	}
-	return &cl
+	return cl, nil
 }
 
 // New returns the HTTP client with cookies and default transport.
-func New(cookieDomain string, cookies []*http.Cookie) *http.Client {
+func New(cookieDomain string, cookies []*http.Cookie) (*http.Client, error) {
 	return NewWithTransport(cookieDomain, cookies, NewTransport(nil))
+}
+
+// Must is a helper function to panic on error.
+func Must(cl *http.Client, err error) *http.Client {
+	if err != nil {
+		panic(err)
+	}
+	return cl
 }
