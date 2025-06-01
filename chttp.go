@@ -12,6 +12,10 @@ import (
 	"golang.org/x/net/publicsuffix"
 )
 
+const (
+	hdrUserAgent = "User-Agent"
+)
+
 // NewWithTransport inits the HTTP client with cookies.  It allows to use
 // the custom Transport.
 func NewWithTransport(cookieDomain string, cookies []*http.Cookie, rt http.RoundTripper) (*http.Client, error) {
@@ -55,7 +59,7 @@ func New(cookieDomain string, cookies []*http.Cookie, opts ...Option) (*http.Cli
 	if opt.userAgent != "" {
 		tr = NewTransport(http.DefaultTransport)
 		tr.BeforeReq = func(req *http.Request) {
-			req.Header["User-Agent"] = []string{opt.userAgent}
+			req.Header[hdrUserAgent] = []string{opt.userAgent}
 		}
 	}
 
