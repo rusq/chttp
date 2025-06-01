@@ -1,6 +1,7 @@
 // Package chttp (Cooked HTTP) provides a wrapper around http.Client with
-// cookies.  It also allows to use custom Transport, which wraps the default
-// transport and calls the user-defined function before and after the request.
+// cookies, that are added to each request.  It also allows to use custom
+// Transport, which wraps the default transport and calls the user-defined
+// function before and after the request.
 package chttp
 
 import (
@@ -33,6 +34,16 @@ func NewWithTransport(cookieDomain string, cookies []*http.Cookie, rt http.Round
 // New returns the HTTP client with cookies and default transport.
 func New(cookieDomain string, cookies []*http.Cookie) (*http.Client, error) {
 	return NewWithTransport(cookieDomain, cookies, NewTransport(nil))
+}
+
+// CookiesToPtr is a convenience function that returns the slice with pointers
+// to cookies.
+func CookiesToPtr(cookies []http.Cookie) []*http.Cookie {
+	var ret = make([]*http.Cookie, len(cookies))
+	for i := range cookies {
+		ret[i] = &cookies[i]
+	}
+	return nil
 }
 
 // Must is a helper function to panic on error.
