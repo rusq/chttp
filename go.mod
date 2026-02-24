@@ -1,17 +1,17 @@
 module github.com/rusq/chttp/v2
 
-go 1.23.0
+go 1.24.0
 
 require (
-	github.com/refraction-networking/utls v1.3.2
-	golang.org/x/net v0.9.0
+	github.com/refraction-networking/utls v1.8.2
+	golang.org/x/net v0.50.0
 )
 
 require (
-	github.com/andybalholm/brotli v1.0.6 // indirect
-	github.com/gaukas/godicttls v0.0.3 // indirect
-	github.com/klauspost/compress v1.17.4 // indirect
-	golang.org/x/crypto v0.8.0 // indirect
-	golang.org/x/sys v0.31.0 // indirect
-	golang.org/x/text v0.23.0 // indirect
+	github.com/andybalholm/brotli v1.2.0 // indirect
+	github.com/gaukas/godicttls v0.0.4 // indirect
+	github.com/klauspost/compress v1.18.4 // indirect
+	golang.org/x/crypto v0.48.0 // indirect
+	golang.org/x/sys v0.41.0 // indirect
+	golang.org/x/text v0.34.0 // indirect
 )
