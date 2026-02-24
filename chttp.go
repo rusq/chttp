@@ -57,9 +57,9 @@ func New(cookieDomain string, cookies []*http.Cookie, opts ...Option) (*http.Cli
 		o(&opt)
 	}
 
-	tr := transport.NewTransport(nil)
+	tr := transport.NewFuncTransport(nil)
 	if opt.userAgent != "" {
-		tr = transport.NewTransport(http.DefaultTransport)
+		tr = transport.NewFuncTransport(http.DefaultTransport)
 		tr.BeforeReq = func(req *http.Request) {
 			req.Header[hdrUserAgent] = []string{opt.userAgent}
 		}
@@ -75,7 +75,7 @@ func CookiesToPtr(cookies []http.Cookie) []*http.Cookie {
 	for i := range cookies {
 		ret[i] = &cookies[i]
 	}
-	return nil
+	return ret
 }
 
 // Must is a helper function to panic on error.
