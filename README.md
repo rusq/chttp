@@ -11,12 +11,16 @@ import "github.com/rusq/chttp"
 
 func getSomething() error {
 	cookies := readFromFile()
-	cl := chttp.New("https://slack.com", cookies)
-
-	resp, err := cl.Get("url") // will execute with the cookies
+	cl, err := chttp.New("https://slack.com", cookies)
 	if err != nil {
 		return err
 	}
+
+	resp, err := cl.Get("url") // executes with cookies from the jar
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
 	// do something with resp
 	return nil
 }
