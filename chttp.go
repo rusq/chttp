@@ -9,6 +9,7 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 
+	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/publicsuffix"
 
 	"github.com/rusq/chttp/transport"
@@ -39,6 +40,7 @@ func NewWithTransport(cookieDomain string, cookies []*http.Cookie, rt http.Round
 
 type options struct {
 	userAgent string
+	utls      *utls.Config
 }
 
 type Option func(*options)
@@ -50,6 +52,17 @@ func WithUserAgent(ua string) Option {
 	}
 }
 
+// WithUTLS enables uTLS transport. By default it emulates Chrome ClientHello.
+func WithUTLS(cfg *utls.Config) Option {
+	return func(o *options) {
+		if cfg == nil {
+			o.utls = &utls.Config{}
+			return
+		}
+		o.utls = cfg.Clone()
+	}
+}
+
 // New returns the HTTP client with cookies and default transport.
 func New(cookieDomain string, cookies []*http.Cookie, opts ...Option) (*http.Client, error) {
 	var opt options
@@ -57,9 +70,16 @@ func New(cookieDomain string, cookies []*http.Cookie, opts ...Option) (*http.Cli
 		o(&opt)
 	}
 
+	if opt.utls != nil {
+		tr := transport.NewUTLSTransport(opt.utls)
+		if opt.userAgent != "" {
+			tr.WithUserAgent(opt.userAgent)
+		}
+		return NewWithTransport(cookieDomain, cookies, tr)
+	}
+
 	tr := transport.NewFuncTransport(nil)
 	if opt.userAgent != "" {
-		tr = transport.NewFuncTransport(http.DefaultTransport)
 		tr.BeforeReq = func(req *http.Request) {
 			req.Header[hdrUserAgent] = []string{opt.userAgent}
 		}

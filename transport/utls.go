@@ -22,6 +22,7 @@ type UTLSTransport struct {
 	tlsConfig             *utls.Config
 	clientHelloID         utls.ClientHelloID
 	customClientHelloSpec *utls.ClientHelloSpec
+	userAgent             string
 	h2                    *http2.Transport
 	http                  http.RoundTripper
 }
@@ -59,18 +60,29 @@ func (t *UTLSTransport) WithCustomClientHelloSpec(spec *utls.ClientHelloSpec) *U
 	return t
 }
 
+// WithUserAgent sets the User-Agent header for requests sent by this transport.
+func (t *UTLSTransport) WithUserAgent(ua string) *UTLSTransport {
+	t.userAgent = ua
+	return t
+}
+
 // RoundTrip implements http.RoundTripper.
 func (t *UTLSTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.URL == nil {
 		return nil, fmt.Errorf("request URL is nil")
 	}
 
-	if !strings.EqualFold(req.URL.Scheme, "https") {
-		return t.http.RoundTrip(req)
+	r := req.Clone(req.Context())
+	if t.userAgent != "" {
+		r.Header.Set("User-Agent", t.userAgent)
 	}
 
-	addr := req.URL.Host
-	if req.URL.Port() == "" {
+	if !strings.EqualFold(r.URL.Scheme, "https") {
+		return t.http.RoundTrip(r)
+	}
+
+	addr := r.URL.Host
+	if r.URL.Port() == "" {
 		addr += ":443"
 	}
 
@@ -79,7 +91,7 @@ func (t *UTLSTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 
-	resp, err := t.roundTripTLS(req, conn)
+	resp, err := t.roundTripTLS(r, conn)
 	if err != nil {
 		_ = conn.Close()
 		return nil, err

@@ -32,7 +32,6 @@ func TestUTLSTransport_RoundTrip(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
@@ -64,5 +63,33 @@ func TestUTLSTransport_RoundTrip(t *testing.T) {
 				t.Fatalf("unexpected body: %q", string(b))
 			}
 		})
+	}
+}
+
+func TestUTLSTransport_WithUserAgent(t *testing.T) {
+	const wantUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0"
+	uaCh := make(chan string, 1)
+
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		uaCh <- r.UserAgent()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	tr := NewUTLSTransport(&utls.Config{InsecureSkipVerify: true}).WithUserAgent(wantUA)
+
+	cl := &http.Client{Transport: tr}
+	resp, err := cl.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("invalid status code: want %d got %d", http.StatusOK, resp.StatusCode)
+	}
+
+	if got := <-uaCh; got != wantUA {
+		t.Fatalf("user agent mismatch: want %q, got %q", wantUA, got)
 	}
 }

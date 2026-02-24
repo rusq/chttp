@@ -6,6 +6,9 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+
+	utls "github.com/refraction-networking/utls"
+	"github.com/rusq/chttp/transport"
 )
 
 func TestUserAgent(t *testing.T) {
@@ -34,6 +37,49 @@ func TestUserAgent(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected init error: %s", err)
 			}
+			resp, err := cl.Get(srv.URL)
+			if err != nil {
+				t.Fatalf("unexpected request error: %s", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("invalid status code: %d", resp.StatusCode)
+			}
+		})
+	}
+}
+
+func TestNew_WithUTLSAndUserAgent(t *testing.T) {
+	tests := []struct {
+		name   string
+		ua     string
+		wantUA string
+	}{
+		{name: "utls with user-agent", ua: "custom UA", wantUA: "custom UA"},
+		{name: "utls without user-agent", ua: "", wantUA: "Go-http-client/1.1"},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if got := r.Header.Get(hdrUserAgent); got != tc.wantUA {
+					t.Errorf("user agent: want: %q != got %q", tc.wantUA, got)
+					http.Error(w, "fail", http.StatusBadRequest)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer srv.Close()
+
+			cl, err := New(srv.URL, nil, WithUTLS(&utls.Config{InsecureSkipVerify: true}), WithUserAgent(tc.ua))
+			if err != nil {
+				t.Fatalf("unexpected init error: %s", err)
+			}
+			if _, ok := cl.Transport.(*transport.UTLSTransport); !ok {
+				t.Fatalf("transport type mismatch: got %T", cl.Transport)
+			}
+
 			resp, err := cl.Get(srv.URL)
 			if err != nil {
 				t.Fatalf("unexpected request error: %s", err)
