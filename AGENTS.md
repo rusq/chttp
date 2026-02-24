@@ -10,18 +10,20 @@
 
 ## Current Repository Structure
 - `chttp.go`: public API for client construction and helper utilities.
+- `Makefile`: convenience targets for regular and integration test runs.
 - `transport/transport.go`: transport wrapper implementing pre/post request hooks.
 - `transport/utls.go`: uTLS-backed transport with default Chrome hello and optional custom ClientHello signature.
 - `chttp_test.go`: table-driven tests for `WithUserAgent`, cookie jar/domain handling, and helper utilities.
 - `transport/transport_test.go`: table-driven tests for `FuncTransport` callback behavior.
 - `transport/utls_test.go`: table-driven tests for uTLS transport and user-agent behavior.
-- `transport/utls_integration_test.go`: opt-in external HTTPS connectivity integration tests.
+- `transport/utls_integration_test.go`: opt-in external HTTPS connectivity integration tests, with optional debug HTML output (`TEST_DEBUG=1`).
 - `README.md`: usage overview.
 
 ## Verified Current State
 - `go test ./...` passes.
+- `make test` and `make test_all` are available for race+coverage runs.
 - Constructor naming is consistent:
-  - `chttp.New` now calls `transport.NewFuncTransport`.
+  - `chttp.New` uses `transport.NewFuncTransport` by default.
 - `CookiesToPtr` now correctly returns the populated slice.
 - README usage now matches API (`New` returns `(*http.Client, error)`).
 - `WithUTLS` option is available; when enabled, `New` uses `transport.UTLSTransport`.
@@ -56,8 +58,12 @@
 ## Practical Engineering Notes
 - Recommended regression command:
   - `go test ./...`
+- Make targets:
+  - `make test` (unit tests with race+coverage)
+  - `make test_all` (integration tests enabled with race+coverage)
 - To run external connectivity integration tests:
   - `CHTTP_RUN_INTEGRATION_TESTS=1 go test ./transport -run ExternalHTTPSIntegration`
+  - optional debug mode: `CHTTP_RUN_INTEGRATION_TESTS=1 TEST_DEBUG=1 go test ./transport -run ExternalHTTPSIntegration`
 - Existing table-driven coverage now includes:
   1. cookie jar set/read and outbound cookie emission
   2. before/after transport callback execution

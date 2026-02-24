@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Package chttp (Cooked HTTP) provides a wrapper around http.Client with
 // cookies, that are added to each request.  It also allows to use custom
 // Transport, which wraps the default transport and calls the user-defined

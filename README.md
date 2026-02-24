@@ -63,6 +63,12 @@ Integration tests:
 - Unit tests: `go test ./...`
 - External HTTPS integration tests (opt-in):
   - `CHTTP_RUN_INTEGRATION_TESTS=1 go test ./transport -run ExternalHTTPSIntegration`
+  - `CHTTP_RUN_INTEGRATION_TESTS=1 TEST_DEBUG=1 go test ./transport -run ExternalHTTPSIntegration`
+    - when `TEST_DEBUG=1` is set, integration responses are saved as `<host>.html` in the current directory.
+
+Makefile shortcuts:
+- `make test` runs `go test ./... -race -cover`
+- `make test_all` runs integration tests with race+coverage enabled
 
 See [package documentation][1] if you'd like to read more. 
 
