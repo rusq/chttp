@@ -10,6 +10,8 @@ import (
 	"net/url"
 
 	"golang.org/x/net/publicsuffix"
+
+	"github.com/rusq/chttp/transport"
 )
 
 const (
@@ -55,9 +57,9 @@ func New(cookieDomain string, cookies []*http.Cookie, opts ...Option) (*http.Cli
 		o(&opt)
 	}
 
-	tr := NewTransport(nil)
+	tr := transport.NewTransport(nil)
 	if opt.userAgent != "" {
-		tr = NewTransport(http.DefaultTransport)
+		tr = transport.NewTransport(http.DefaultTransport)
 		tr.BeforeReq = func(req *http.Request) {
 			req.Header[hdrUserAgent] = []string{opt.userAgent}
 		}
