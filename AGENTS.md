@@ -1,7 +1,7 @@
 # AGENTS.md
 
 ## Project Snapshot
-- Module: `github.com/rusq/chttp`
+- Module: `github.com/rusq/chttp/v2`
 - Goal: provide a thin wrapper around `net/http.Client` with:
   - cookie jar initialization for a given domain
   - pluggable/custom transport hooks

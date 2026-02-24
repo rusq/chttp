@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	utls "github.com/refraction-networking/utls"
-	"github.com/rusq/chttp/transport"
+	"github.com/rusq/chttp/v2/transport"
 )
 
 func TestUserAgent(t *testing.T) {

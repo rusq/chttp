@@ -1,6 +1,6 @@
 # chttp
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/rusq/chttp.svg)][1]
+[![Go Reference](https://pkg.go.dev/badge/github.com/rusq/chttp/v2.svg)][1]
 
 Cooked HTTP — a standard golang HTTP Client wrapper that adds a cookie jar
 with user-defined cookies, and a customised transport.
@@ -13,7 +13,7 @@ Features:
 
 Simple usage:
 ```go
-import "github.com/rusq/chttp"
+import "github.com/rusq/chttp/v2"
 
 func getSomething() error {
 	cookies := readFromFile()
@@ -35,7 +35,7 @@ func getSomething() error {
 uTLS usage:
 ```go
 import (
-	"github.com/rusq/chttp"
+	"github.com/rusq/chttp/v2"
 	utls "github.com/refraction-networking/utls"
 )
 
@@ -72,4 +72,4 @@ Makefile shortcuts:
 
 See [package documentation][1] if you'd like to read more. 
 
-[1]: https://pkg.go.dev/github.com/rusq/chttp
+[1]: https://pkg.go.dev/github.com/rusq/chttp/v2

@@ -14,7 +14,7 @@ import (
 	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/publicsuffix"
 
-	"github.com/rusq/chttp/transport"
+	"github.com/rusq/chttp/v2/transport"
 )
 
 const (

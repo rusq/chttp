@@ -1,4 +1,4 @@
-module github.com/rusq/chttp
+module github.com/rusq/chttp/v2
 
 go 1.23.0
 
