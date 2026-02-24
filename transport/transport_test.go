@@ -27,7 +27,6 @@ func TestFuncTransport_CallbackExecution(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			var gotReq *http.Request
 			baseResp := &http.Response{

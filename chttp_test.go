@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	utls "github.com/refraction-networking/utls"
+
 	"github.com/rusq/chttp/v2/transport"
 )
 
@@ -117,7 +118,6 @@ func TestNew_SetsCookiesAndEmitsOnRequests(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			expected := make(map[string]string, len(tc.cookies))
 			for _, c := range tc.cookies {

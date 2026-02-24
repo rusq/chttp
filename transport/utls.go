@@ -157,10 +157,5 @@ type closeConnReadCloser struct {
 }
 
 func (c *closeConnReadCloser) Close() error {
-	err1 := c.ReadCloser.Close()
-	err2 := c.conn.Close()
-	if err1 != nil {
-		return err1
-	}
-	return err2
+	return errors.Join(c.ReadCloser.Close(), c.conn.Close())
 }
