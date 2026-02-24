@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Package chttp (Cooked HTTP) provides a wrapper around http.Client with
 // cookies, that are added to each request.  It also allows to use custom
 // Transport, which wraps the default transport and calls the user-defined
@@ -9,7 +11,10 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 
+	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/publicsuffix"
+
+	"github.com/rusq/chttp/v2/transport"
 )
 
 const (
@@ -37,6 +42,7 @@ func NewWithTransport(cookieDomain string, cookies []*http.Cookie, rt http.Round
 
 type options struct {
 	userAgent string
+	utls      *utls.Config
 }
 
 type Option func(*options)
@@ -48,6 +54,17 @@ func WithUserAgent(ua string) Option {
 	}
 }
 
+// WithUTLS enables uTLS transport. By default it emulates Chrome ClientHello.
+func WithUTLS(cfg *utls.Config) Option {
+	return func(o *options) {
+		if cfg == nil {
+			o.utls = &utls.Config{}
+			return
+		}
+		o.utls = cfg.Clone()
+	}
+}
+
 // New returns the HTTP client with cookies and default transport.
 func New(cookieDomain string, cookies []*http.Cookie, opts ...Option) (*http.Client, error) {
 	var opt options
@@ -55,9 +72,16 @@ func New(cookieDomain string, cookies []*http.Cookie, opts ...Option) (*http.Cli
 		o(&opt)
 	}
 
-	tr := NewTransport(nil)
+	if opt.utls != nil {
+		tr := transport.NewUTLSTransport(opt.utls)
+		if opt.userAgent != "" {
+			tr.WithUserAgent(opt.userAgent)
+		}
+		return NewWithTransport(cookieDomain, cookies, tr)
+	}
+
+	tr := transport.NewFuncTransport(nil)
 	if opt.userAgent != "" {
-		tr = NewTransport(http.DefaultTransport)
 		tr.BeforeReq = func(req *http.Request) {
 			req.Header[hdrUserAgent] = []string{opt.userAgent}
 		}
@@ -73,7 +97,7 @@ func CookiesToPtr(cookies []http.Cookie) []*http.Cookie {
 	for i := range cookies {
 		ret[i] = &cookies[i]
 	}
-	return nil
+	return ret
 }
 
 // Must is a helper function to panic on error.

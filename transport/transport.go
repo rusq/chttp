@@ -1,10 +1,13 @@
-package chttp
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+// Package transport provides various types of transport.
+package transport
 
 import "net/http"
 
-// Transport is a simple wrapper for http.RoundTripper to do something before
+// FuncTransport is a simple wrapper for http.RoundTripper to do something before
 // and after RoundTrip.
-type Transport struct {
+type FuncTransport struct {
 	tr http.RoundTripper
 	// BeforeReq is called before the request.
 	BeforeReq func(req *http.Request)
@@ -12,9 +15,9 @@ type Transport struct {
 	AfterReq func(resp *http.Response, req *http.Request)
 }
 
-// NewTransport returns a new Transport.
-func NewTransport(tr http.RoundTripper) *Transport {
-	t := &Transport{}
+// NewFuncTransport returns a new Transport.
+func NewFuncTransport(tr http.RoundTripper) *FuncTransport {
+	t := &FuncTransport{}
 	if tr == nil {
 		tr = http.DefaultTransport
 	}
@@ -24,7 +27,7 @@ func NewTransport(tr http.RoundTripper) *Transport {
 
 // RoundTrip implements http.RoundTripper.  It calls BeforeReq before the
 // request and AfterReq after the request.
-func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error) {
+func (t *FuncTransport) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 	if t.BeforeReq != nil {
 		t.BeforeReq(req)
 	}
