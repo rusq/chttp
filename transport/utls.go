@@ -2,6 +2,8 @@ package transport
 
 import (
 	"bufio"
+	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -42,8 +44,12 @@ func NewUTLSTransport(tlsConfig *utls.Config) *UTLSTransport {
 		},
 		tlsConfig:     tlsConfig,
 		clientHelloID: utls.HelloChrome_Auto,
-		h2:            &http2.Transport{},
-		http:          http.DefaultTransport,
+		h2: &http2.Transport{
+			DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
+				return nil, errors.New("should not be called") // thanks @korotovsky
+			},
+		},
+		http: http.DefaultTransport,
 	}
 }
 

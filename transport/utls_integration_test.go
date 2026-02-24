@@ -1,13 +1,17 @@
 package transport
 
 import (
+	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"testing"
 	"time"
 
 	utls "github.com/refraction-networking/utls"
 )
+
+var testDebug = os.Getenv("TEST_DEBUG") == "1"
 
 func TestUTLSTransport_ExternalHTTPSIntegration(t *testing.T) {
 	if testing.Short() {
@@ -23,10 +27,10 @@ func TestUTLSTransport_ExternalHTTPSIntegration(t *testing.T) {
 	}{
 		{name: "example", url: "https://example.com"},
 		{name: "cloudflare", url: "https://www.cloudflare.com"},
+		{name: "browserleaks", url: "https://browserleaks.com/tls"},
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			tr := NewUTLSTransport(&utls.Config{}).
 				WithClientHelloID(utls.HelloChrome_Auto).
@@ -46,6 +50,26 @@ func TestUTLSTransport_ExternalHTTPSIntegration(t *testing.T) {
 			if resp.StatusCode < 200 || resp.StatusCode > 499 {
 				t.Fatalf("unexpected status code %d", resp.StatusCode)
 			}
+			if filename := extractHost(t, tc.url); testDebug && filename != "" {
+				bytes, err := io.ReadAll(resp.Body)
+				if err != nil {
+					t.Errorf("error reading the body: %s", err)
+				}
+				fullname := filename + ".html"
+				if err := os.WriteFile(fullname, bytes, 0o666); err != nil {
+					t.Errorf("error writing file %q: %s", fullname, err)
+				}
+			}
 		})
 	}
+}
+
+func extractHost(t *testing.T, uri string) string {
+	t.Helper()
+	u, err := url.Parse(uri)
+	if err != nil {
+		t.Errorf("error extracting hostname from %s", uri)
+		return ""
+	}
+	return u.Hostname()
 }
