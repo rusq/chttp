@@ -9,6 +9,7 @@ Features:
 - Cookie jar initialization and seeding for a target domain.
 - Option-based request customization (`WithUserAgent`).
 - Optional uTLS transport (`WithUTLS`) with Chrome ClientHello emulation by default.
+- HTTP/2 connection pooling for uTLS transport — connections are reused across requests.
 - Transport hooks via `transport.FuncTransport` (`BeforeReq` / `AfterReq`).
 
 Simple usage:
@@ -49,6 +50,7 @@ func getWithUTLS() error {
 	if err != nil {
 		return err
 	}
+	defer chttp.Close(cl) // releases pooled connections
 
 	resp, err := cl.Get("https://example.com")
 	if err != nil {

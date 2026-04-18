@@ -223,6 +223,33 @@ func TestCookiesToPtr(t *testing.T) {
 	}
 }
 
+func TestClose(t *testing.T) {
+	t.Run("utls transport", func(t *testing.T) {
+		cl, err := New("https://example.com", nil, WithUTLS(nil))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		if err := Close(cl); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	})
+	t.Run("func transport noop", func(t *testing.T) {
+		cl, err := New("https://example.com", nil)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		if err := Close(cl); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	})
+	t.Run("nil transport noop", func(t *testing.T) {
+		cl := &http.Client{}
+		if err := Close(cl); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	})
+}
+
 func TestMust(t *testing.T) {
 	tests := []struct {
 		name      string
