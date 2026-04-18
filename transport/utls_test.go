@@ -3,13 +3,28 @@
 package transport
 
 import (
+	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	utls "github.com/refraction-networking/utls"
 )
+
+// dialCounter wraps a net.Dialer and counts the number of DialContext calls.
+type dialCounter struct {
+	inner *net.Dialer
+	count atomic.Int64
+}
+
+func (d *dialCounter) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	d.count.Add(1)
+	return d.inner.DialContext(ctx, network, addr)
+}
 
 func TestUTLSTransport_RoundTrip(t *testing.T) {
 	tests := []struct {
@@ -65,6 +80,56 @@ func TestUTLSTransport_RoundTrip(t *testing.T) {
 				t.Fatalf("unexpected body: %q", string(b))
 			}
 		})
+	}
+}
+
+func TestUTLSTransport_ConnectionReuse(t *testing.T) {
+	var (
+		mu            sync.Mutex
+		reqCount      int
+		protoVersions = make(map[string]int)
+	)
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		reqCount++
+		protoVersions[r.Proto]++
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	srv.EnableHTTP2 = true
+	srv.StartTLS()
+	defer srv.Close()
+
+	tr := NewUTLSTransport(&utls.Config{InsecureSkipVerify: true})
+	defer tr.Close()
+
+	// Wrap the dialer to count TCP connections (each represents a TLS handshake).
+	dc := &dialCounter{inner: tr.dialer.(*net.Dialer)}
+	tr.dialer = dc
+
+	cl := &http.Client{Transport: tr}
+
+	// Make multiple sequential requests to the same server.
+	for range 5 {
+		resp, err := cl.Get(srv.URL)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if reqCount != 5 {
+		t.Fatalf("expected 5 requests, got %d", reqCount)
+	}
+	if protoVersions["HTTP/2.0"] != 5 {
+		t.Fatalf("expected all 5 requests over HTTP/2, got protocol distribution: %v", protoVersions)
+	}
+	if dials := dc.count.Load(); dials != 1 {
+		t.Fatalf("expected 1 TCP dial (connection reuse), got %d", dials)
 	}
 }
 

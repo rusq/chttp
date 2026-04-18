@@ -4,6 +4,7 @@ package transport
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -17,18 +18,24 @@ import (
 	"golang.org/x/net/http2"
 )
 
+// dialer is the interface used by UTLSTransport to establish TCP connections.
+type dialer interface {
+	DialContext(ctx context.Context, network, addr string) (net.Conn, error)
+}
+
 // UTLSTransport is an http.RoundTripper using uTLS for HTTPS handshakes.
 //
 // It emulates Chrome's ClientHello by default. A custom TLS signature can be
 // provided via CustomClientHelloSpec.
 type UTLSTransport struct {
-	dialer                *net.Dialer
+	dialer                dialer
 	tlsConfig             *utls.Config
 	clientHelloID         utls.ClientHelloID
 	customClientHelloSpec *utls.ClientHelloSpec
 	userAgent             string
 	h2                    *http2.Transport
 	http                  http.RoundTripper
+	pool                  *connPool
 }
 
 // NewUTLSTransport returns a new uTLS transport.
@@ -52,6 +59,7 @@ func NewUTLSTransport(tlsConfig *utls.Config) *UTLSTransport {
 			},
 		},
 		http: http.DefaultTransport,
+		pool: newConnPool(),
 	}
 }
 
@@ -94,12 +102,23 @@ func (t *UTLSTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		addr += ":443"
 	}
 
+	// Try reusing a pooled HTTP/2 connection.
+	if cc, ok := t.pool.getH2(addr); ok {
+		resp, err := cc.RoundTrip(r)
+		if err == nil {
+			return resp, nil
+		}
+		// Connection went bad; remove only if it's still the same entry
+		// (another goroutine may have already replaced it with a fresh one).
+		t.pool.removeH2(addr, cc)
+	}
+
 	conn, err := t.dialer.DialContext(req.Context(), "tcp", addr)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := t.roundTripTLS(r, conn)
+	resp, err := t.roundTripTLS(r, conn, addr)
 	if err != nil {
 		_ = conn.Close()
 		return nil, err
@@ -108,7 +127,12 @@ func (t *UTLSTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-func (t *UTLSTransport) roundTripTLS(req *http.Request, rawConn net.Conn) (*http.Response, error) {
+// Close closes idle connections held by this transport.
+func (t *UTLSTransport) Close() error {
+	return t.pool.Close()
+}
+
+func (t *UTLSTransport) roundTripTLS(req *http.Request, rawConn net.Conn, addr string) (*http.Response, error) {
 	tlsCfg := t.tlsConfig.Clone()
 	if tlsCfg.ServerName == "" {
 		tlsCfg.ServerName = req.URL.Hostname()
@@ -134,6 +158,12 @@ func (t *UTLSTransport) roundTripTLS(req *http.Request, rawConn net.Conn) (*http
 		cc, err := t.h2.NewClientConn(uConn)
 		if err != nil {
 			return nil, err
+		}
+		// Pool the connection. If another goroutine raced and already
+		// stored one, use that instead and close our new connection.
+		if existing, stored := t.pool.putH2(addr, cc); !stored && existing != nil {
+			_ = uConn.Close()
+			return existing.RoundTrip(req)
 		}
 		return cc.RoundTrip(req)
 	}

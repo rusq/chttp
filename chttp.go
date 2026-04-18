@@ -7,6 +7,7 @@
 package chttp
 
 import (
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -98,6 +99,16 @@ func CookiesToPtr(cookies []http.Cookie) []*http.Cookie {
 		ret[i] = &cookies[i]
 	}
 	return ret
+}
+
+// Close releases resources held by the client's transport. It is safe to call
+// on clients whose transport does not require cleanup (e.g. FuncTransport) —
+// in that case it is a no-op.
+func Close(cl *http.Client) error {
+	if c, ok := cl.Transport.(io.Closer); ok {
+		return c.Close()
+	}
+	return nil
 }
 
 // Must is a helper function to panic on error.
