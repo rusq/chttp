@@ -6,11 +6,13 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -33,6 +35,7 @@ type UTLSTransport struct {
 	clientHelloID         utls.ClientHelloID
 	customClientHelloSpec *utls.ClientHelloSpec
 	userAgent             string
+	proxy                 func(*http.Request) (*url.URL, error)
 	h2                    *http2.Transport
 	http                  http.RoundTripper
 	pool                  *connPool
@@ -53,6 +56,7 @@ func NewUTLSTransport(tlsConfig *utls.Config) *UTLSTransport {
 		},
 		tlsConfig:     tlsConfig,
 		clientHelloID: utls.HelloChrome_Auto,
+		proxy:         http.ProxyFromEnvironment,
 		h2: &http2.Transport{
 			DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
 				return nil, errors.New("should not be called") // thanks @korotovsky
@@ -79,6 +83,16 @@ func (t *UTLSTransport) WithCustomClientHelloSpec(spec *utls.ClientHelloSpec) *U
 // WithUserAgent sets the User-Agent header for requests sent by this transport.
 func (t *UTLSTransport) WithUserAgent(ua string) *UTLSTransport {
 	t.userAgent = ua
+	return t
+}
+
+// WithProxy sets the function that picks the proxy for an HTTPS request, as in
+// http.Transport.Proxy. The default is http.ProxyFromEnvironment. Requests go
+// through an HTTP CONNECT tunnel, so the uTLS ClientHello reaches the server
+// unchanged. A nil function disables the proxy. Plain HTTP requests use
+// http.DefaultTransport and its own proxy settings.
+func (t *UTLSTransport) WithProxy(proxy func(*http.Request) (*url.URL, error)) *UTLSTransport {
+	t.proxy = proxy
 	return t
 }
 
@@ -113,7 +127,7 @@ func (t *UTLSTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		t.pool.removeH2(addr, cc)
 	}
 
-	conn, err := t.dialer.DialContext(req.Context(), "tcp", addr)
+	conn, err := t.dial(r, addr)
 	if err != nil {
 		return nil, err
 	}
@@ -130,6 +144,72 @@ func (t *UTLSTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 // Close closes idle connections held by this transport.
 func (t *UTLSTransport) Close() error {
 	return t.pool.Close()
+}
+
+// dial connects to addr, through a CONNECT tunnel if t.proxy returns a proxy
+// for req.
+func (t *UTLSTransport) dial(req *http.Request, addr string) (net.Conn, error) {
+	ctx := req.Context()
+	var proxyURL *url.URL
+	if t.proxy != nil {
+		var err error
+		if proxyURL, err = t.proxy(req); err != nil {
+			return nil, err
+		}
+	}
+	if proxyURL == nil {
+		return t.dialer.DialContext(ctx, "tcp", addr)
+	}
+	if proxyURL.Scheme != "http" {
+		return nil, fmt.Errorf("unsupported proxy scheme %q", proxyURL.Scheme)
+	}
+
+	proxyAddr := proxyURL.Host
+	if proxyURL.Port() == "" {
+		proxyAddr = net.JoinHostPort(proxyURL.Hostname(), "80")
+	}
+	conn, err := t.dialer.DialContext(ctx, "tcp", proxyAddr)
+	if err != nil {
+		return nil, err
+	}
+	if err := connectTunnel(ctx, conn, proxyURL, addr); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return conn, nil
+}
+
+// connectTunnel asks the proxy at the other end of conn to open a tunnel to
+// addr.
+func connectTunnel(ctx context.Context, conn net.Conn, proxyURL *url.URL, addr string) error {
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+
+	connectReq := &http.Request{
+		Method: http.MethodConnect,
+		URL:    &url.URL{Opaque: addr},
+		Host:   addr,
+		Header: make(http.Header),
+	}
+	if u := proxyURL.User; u != nil {
+		password, _ := u.Password()
+		creds := base64.StdEncoding.EncodeToString([]byte(u.Username() + ":" + password))
+		connectReq.Header.Set("Proxy-Authorization", "Basic "+creds)
+	}
+	if err := connectReq.Write(conn); err != nil {
+		return err
+	}
+
+	// Discarding the buffered reader is safe: the TLS server sends nothing
+	// until it receives the ClientHello.
+	resp, err := http.ReadResponse(bufio.NewReader(conn), connectReq)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("proxy CONNECT to %s: %s", addr, resp.Status)
+	}
+	return nil
 }
 
 func (t *UTLSTransport) roundTripTLS(req *http.Request, rawConn net.Conn, addr string) (*http.Response, error) {
