@@ -3,8 +3,10 @@
 package transport
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -17,6 +19,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	utls "github.com/refraction-networking/utls"
 )
@@ -30,6 +33,12 @@ type dialCounter struct {
 func (d *dialCounter) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	d.count.Add(1)
 	return d.inner.DialContext(ctx, network, addr)
+}
+
+type dialFunc func(context.Context, string, string) (net.Conn, error)
+
+func (f dialFunc) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	return f(ctx, network, addr)
 }
 
 func TestUTLSTransport_RoundTrip(t *testing.T) {
@@ -273,6 +282,263 @@ func TestUTLSTransport_Proxy(t *testing.T) {
 			}
 			if got.auth != wantAuth {
 				t.Fatalf("Proxy-Authorization mismatch: want %q, got %q", wantAuth, got.auth)
+			}
+		})
+	}
+}
+
+func TestUTLSTransport_ProxyRouteReuse(t *testing.T) {
+	srv, _ := newTestH2Server(t)
+	connects := []chan connectInfo{make(chan connectInfo, 4), make(chan connectInfo, 4)}
+	proxies := make([]*url.URL, len(connects))
+	for i, ch := range connects {
+		proxy := newConnectProxy(t, "200 Connection established", ch)
+		t.Cleanup(proxy.Close)
+		var err error
+		proxies[i], err = url.Parse(proxy.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	proxies[0].User = url.UserPassword("user", "pass")
+	otherCredentials := *proxies[0]
+	otherCredentials.User = url.UserPassword("user", "other")
+
+	var selected *url.URL
+	var selectionErr error
+	var selections int
+	tr := NewUTLSTransport(&utls.Config{InsecureSkipVerify: true}).WithProxy(func(*http.Request) (*url.URL, error) {
+		selections++
+		return selected, selectionErr
+	})
+	defer tr.Close()
+	var dials []string
+	d := &net.Dialer{}
+	tr.dialer = dialFunc(func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dials = append(dials, addr)
+		return d.DialContext(ctx, network, addr)
+	})
+	cl := &http.Client{Transport: tr, Timeout: 5 * time.Second}
+
+	steps := []struct {
+		name      string
+		proxy     *url.URL
+		wantDials int
+		wantAddr  string
+		// A nonnegative index identifies a proxy that must receive a new CONNECT.
+		connectProxy int
+		wantAuth     string
+	}{
+		{"direct", nil, 1, srv.Listener.Addr().String(), -1, ""},
+		{"first proxy", proxies[0], 2, proxies[0].Host, 0, "Basic dXNlcjpwYXNz"},
+		{"second proxy", proxies[1], 3, proxies[1].Host, 1, ""},
+		{"different credentials", &otherCredentials, 4, proxies[0].Host, 0, "Basic dXNlcjpvdGhlcg=="},
+		{"reuse first proxy", proxies[0], 4, "", -1, ""},
+		{"reuse direct", nil, 4, "", -1, ""},
+		{"reuse second proxy", proxies[1], 4, "", -1, ""},
+		{"reuse different credentials", &otherCredentials, 4, "", -1, ""},
+	}
+	for _, step := range steps {
+		t.Run(step.name, func(t *testing.T) {
+			selected = step.proxy
+			before := selections
+			resp, err := cl.Get(srv.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.ProtoMajor != 2 {
+				t.Fatalf("want HTTP/2, got %s", resp.Proto)
+			}
+			if selections != before+1 {
+				t.Fatalf("want one proxy selection per request, got %d", selections-before)
+			}
+			if len(dials) != step.wantDials {
+				t.Fatalf("want %d dials, got %d", step.wantDials, len(dials))
+			}
+			if step.wantAddr != "" && dials[len(dials)-1] != step.wantAddr {
+				t.Fatalf("want dial to %s, got %s", step.wantAddr, dials[len(dials)-1])
+			}
+			for i, ch := range connects {
+				select {
+				case got := <-ch:
+					if i != step.connectProxy || got.target != srv.Listener.Addr().String() || got.auth != step.wantAuth {
+						t.Fatalf("unexpected CONNECT at proxy %d: %+v", i, got)
+					}
+				default:
+					if i == step.connectProxy {
+						t.Fatalf("missing CONNECT at proxy %d", i)
+					}
+				}
+			}
+		})
+		if t.Failed() {
+			return
+		}
+	}
+
+	selectorErr := errors.New("proxy selection failed")
+	for _, tc := range []struct {
+		name    string
+		proxy   *url.URL
+		err     error
+		wantErr error
+		wantMsg string
+	}{
+		{name: "selector error with pooled route", proxy: proxies[0], err: selectorErr, wantErr: selectorErr},
+		{name: "unsupported proxy with pooled origin", proxy: &url.URL{Scheme: "https", Host: proxies[0].Host}, wantMsg: `unsupported proxy scheme "https"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			selected, selectionErr = tc.proxy, tc.err
+			before := selections
+			resp, err := cl.Get(srv.URL)
+			if resp != nil {
+				resp.Body.Close()
+			}
+			if err == nil || (tc.wantErr != nil && !errors.Is(err, tc.wantErr)) || (tc.wantMsg != "" && !strings.Contains(err.Error(), tc.wantMsg)) {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if selections != before+1 || len(dials) != 4 {
+				t.Fatalf("want one selection and no additional dials, got %d selections and %d total dials", selections-before, len(dials))
+			}
+		})
+	}
+}
+
+// connectPhaseConn signals when CONNECT reaches the selected I/O operation.
+type connectPhaseConn struct {
+	net.Conn
+	reading bool
+	started chan struct{}
+	once    sync.Once
+}
+
+func (c *connectPhaseConn) Read(p []byte) (int, error) {
+	if c.reading {
+		c.once.Do(func() { close(c.started) })
+	}
+	return c.Conn.Read(p)
+}
+
+func (c *connectPhaseConn) Write(p []byte) (int, error) {
+	if !c.reading {
+		c.once.Do(func() { close(c.started) })
+	}
+	return c.Conn.Write(p)
+}
+
+func TestConnectTunnel_ContextErrors(t *testing.T) {
+	for _, viaClient := range []bool{false, true} {
+		for _, reading := range []bool{false, true} {
+			for _, deadline := range []bool{false, true} {
+				t.Run(fmt.Sprintf("client=%t/read=%t/deadline=%t", viaClient, reading, deadline), func(t *testing.T) {
+					ctx, cancel := context.WithCancel(context.Background())
+					wantErr := context.Canceled
+					if deadline {
+						cancel()
+						ctx, cancel = context.WithTimeout(context.Background(), time.Second)
+						wantErr = context.DeadlineExceeded
+					}
+					defer cancel()
+					client, peer := net.Pipe()
+					defer client.Close()
+					defer peer.Close()
+					conn := &connectPhaseConn{Conn: client, reading: reading, started: make(chan struct{})}
+					peerDone := make(chan error, 1)
+					if reading {
+						go func() {
+							_, err := http.ReadRequest(bufio.NewReader(peer))
+							if err == nil {
+								_, err = io.Copy(io.Discard, peer)
+							}
+							peerDone <- err
+						}()
+					}
+					proxyURL := &url.URL{Scheme: "http", Host: "proxy.invalid:80"}
+					tr := NewUTLSTransport(nil).WithProxy(http.ProxyURL(proxyURL))
+					defer tr.Close()
+					tr.dialer = dialFunc(func(context.Context, string, string) (net.Conn, error) {
+						return conn, nil
+					})
+					done := make(chan error, 1)
+					go func() {
+						if viaClient {
+							req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://example.com/", nil)
+							if err != nil {
+								done <- err
+								return
+							}
+							resp, err := (&http.Client{Transport: tr}).Do(req)
+							if resp != nil {
+								resp.Body.Close()
+							}
+							done <- err
+							return
+						}
+						done <- connectTunnel(ctx, conn, proxyURL, "example.com:443")
+					}()
+					select {
+					case <-conn.started:
+					case <-time.After(5 * time.Second):
+						t.Fatal("CONNECT did not reach the expected I/O operation")
+					}
+					if !deadline {
+						cancel()
+					}
+					select {
+					case err := <-done:
+						if !errors.Is(err, wantErr) {
+							t.Fatalf("want %v, got %v", wantErr, err)
+						}
+					case <-time.After(5 * time.Second):
+						t.Fatal("CONNECT did not unblock after context cancellation")
+					}
+					if reading {
+						select {
+						case err := <-peerDone:
+							if err != nil {
+								t.Fatalf("proxy read: %v", err)
+							}
+						case <-time.After(5 * time.Second):
+							t.Fatal("proxy connection was not closed")
+						}
+					} else {
+						_ = peer.SetReadDeadline(time.Now().Add(time.Second))
+						if _, err := peer.Read(make([]byte, 1)); !errors.Is(err, io.EOF) {
+							t.Fatalf("want closed proxy connection, got %v", err)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestConnectTunnel_NetworkErrors(t *testing.T) {
+	for _, reading := range []bool{false, true} {
+		t.Run(fmt.Sprintf("read=%t", reading), func(t *testing.T) {
+			client, peer := net.Pipe()
+			defer client.Close()
+			defer peer.Close()
+			wantErr := io.ErrClosedPipe
+			if reading {
+				wantErr = io.ErrUnexpectedEOF
+				go func() {
+					_, _ = http.ReadRequest(bufio.NewReader(peer))
+					peer.Close()
+				}()
+			} else {
+				peer.Close()
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			err := connectTunnel(ctx, client, &url.URL{Scheme: "http", Host: "proxy.invalid:80"}, "example.com:443")
+			if !errors.Is(err, wantErr) || ctx.Err() != nil {
+				t.Fatalf("want network error %v with active context, got %v (context: %v)", wantErr, err, ctx.Err())
 			}
 		})
 	}

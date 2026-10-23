@@ -50,7 +50,7 @@ func newTestH2Server(t *testing.T) (srv *httptest.Server, dial func() *http2.Cli
 func TestConnPool_GetPut(t *testing.T) {
 	_, dial := newTestH2Server(t)
 	p := newConnPool()
-	addr := "example.com:443"
+	addr := h2PoolKey{addr: "example.com:443"}
 
 	if _, ok := p.getH2(addr); ok {
 		t.Fatal("expected empty pool to return nothing")
@@ -74,7 +74,7 @@ func TestConnPool_GetPut(t *testing.T) {
 func TestConnPool_PutRace(t *testing.T) {
 	_, dial := newTestH2Server(t)
 	p := newConnPool()
-	addr := "example.com:443"
+	addr := h2PoolKey{addr: "example.com:443"}
 
 	cc1 := dial()
 	p.putH2(addr, cc1)
@@ -93,7 +93,7 @@ func TestConnPool_PutRace(t *testing.T) {
 func TestConnPool_RemoveIdentityAware(t *testing.T) {
 	_, dial := newTestH2Server(t)
 	p := newConnPool()
-	addr := "example.com:443"
+	addr := h2PoolKey{addr: "example.com:443"}
 
 	cc1 := dial()
 	p.putH2(addr, cc1)
@@ -120,7 +120,7 @@ func TestConnPool_RemoveIdentityAware(t *testing.T) {
 func TestConnPool_Close(t *testing.T) {
 	_, dial := newTestH2Server(t)
 	p := newConnPool()
-	addr := "example.com:443"
+	addr := h2PoolKey{addr: "example.com:443"}
 
 	p.putH2(addr, dial())
 
@@ -145,7 +145,7 @@ func TestConnPool_ConcurrentAccess(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := range 10 {
 		wg.Add(1)
-		addr := net.JoinHostPort("example.com", "443")
+		addr := h2PoolKey{addr: net.JoinHostPort("example.com", "443")}
 		_ = i
 		go func() {
 			defer wg.Done()

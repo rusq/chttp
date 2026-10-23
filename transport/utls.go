@@ -116,23 +116,38 @@ func (t *UTLSTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		addr += ":443"
 	}
 
+	var proxyURL *url.URL
+	if t.proxy != nil {
+		var err error
+		if proxyURL, err = t.proxy(r); err != nil {
+			return nil, err
+		}
+	}
+	key := h2PoolKey{addr: addr}
+	if proxyURL != nil {
+		if proxyURL.Scheme != "http" {
+			return nil, fmt.Errorf("unsupported proxy scheme %q", proxyURL.Scheme)
+		}
+		key.proxy = proxyURL.String()
+	}
+
 	// Try reusing a pooled HTTP/2 connection.
-	if cc, ok := t.pool.getH2(addr); ok {
+	if cc, ok := t.pool.getH2(key); ok {
 		resp, err := cc.RoundTrip(r)
 		if err == nil {
 			return resp, nil
 		}
 		// Connection went bad; remove only if it's still the same entry
 		// (another goroutine may have already replaced it with a fresh one).
-		t.pool.removeH2(addr, cc)
+		t.pool.removeH2(key, cc)
 	}
 
-	conn, err := t.dial(r, addr)
+	conn, err := t.dial(r, addr, proxyURL)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := t.roundTripTLS(r, conn, addr)
+	resp, err := t.roundTripTLS(r, conn, key)
 	if err != nil {
 		_ = conn.Close()
 		return nil, err
@@ -146,22 +161,12 @@ func (t *UTLSTransport) Close() error {
 	return t.pool.Close()
 }
 
-// dial connects to addr, through a CONNECT tunnel if t.proxy returns a proxy
-// for req.
-func (t *UTLSTransport) dial(req *http.Request, addr string) (net.Conn, error) {
+// dial connects to addr, through a CONNECT tunnel if proxyURL is non-nil.
+// The proxy has already been selected and validated before pool lookup.
+func (t *UTLSTransport) dial(req *http.Request, addr string, proxyURL *url.URL) (net.Conn, error) {
 	ctx := req.Context()
-	var proxyURL *url.URL
-	if t.proxy != nil {
-		var err error
-		if proxyURL, err = t.proxy(req); err != nil {
-			return nil, err
-		}
-	}
 	if proxyURL == nil {
 		return t.dialer.DialContext(ctx, "tcp", addr)
-	}
-	if proxyURL.Scheme != "http" {
-		return nil, fmt.Errorf("unsupported proxy scheme %q", proxyURL.Scheme)
 	}
 
 	proxyAddr := proxyURL.Host
@@ -197,6 +202,9 @@ func connectTunnel(ctx context.Context, conn net.Conn, proxyURL *url.URL, addr s
 		connectReq.Header.Set("Proxy-Authorization", "Basic "+creds)
 	}
 	if err := connectReq.Write(conn); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return err
 	}
 
@@ -204,6 +212,9 @@ func connectTunnel(ctx context.Context, conn net.Conn, proxyURL *url.URL, addr s
 	// until it receives the ClientHello.
 	resp, err := http.ReadResponse(bufio.NewReader(conn), connectReq)
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return err
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -212,7 +223,7 @@ func connectTunnel(ctx context.Context, conn net.Conn, proxyURL *url.URL, addr s
 	return nil
 }
 
-func (t *UTLSTransport) roundTripTLS(req *http.Request, rawConn net.Conn, addr string) (*http.Response, error) {
+func (t *UTLSTransport) roundTripTLS(req *http.Request, rawConn net.Conn, key h2PoolKey) (*http.Response, error) {
 	tlsCfg := t.tlsConfig.Clone()
 	if tlsCfg.ServerName == "" {
 		tlsCfg.ServerName = req.URL.Hostname()
@@ -241,7 +252,7 @@ func (t *UTLSTransport) roundTripTLS(req *http.Request, rawConn net.Conn, addr s
 		}
 		// Pool the connection. If another goroutine raced and already
 		// stored one, use that instead and close our new connection.
-		if existing, stored := t.pool.putH2(addr, cc); !stored && existing != nil {
+		if existing, stored := t.pool.putH2(key, cc); !stored && existing != nil {
 			_ = uConn.Close()
 			return existing.RoundTrip(req)
 		}
