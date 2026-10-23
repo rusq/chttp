@@ -35,6 +35,7 @@
   - `WithClientHelloID(...)` for predefined signatures
   - `WithCustomClientHelloSpec(...)` for custom signatures
   - `WithUserAgent(...)` for transport-level UA injection
+  - `WithProxy(...)` to pick the HTTPS proxy (default `http.ProxyFromEnvironment`; `http://` proxies only, via CONNECT tunnel)
   - `Close()` to release pooled HTTP/2 connections
 - `chttp.Close(cl)` is a package-level helper that calls `Close()` on the transport if it implements `io.Closer` (no-op for `FuncTransport`)
 
@@ -82,6 +83,7 @@
   6. uTLS transport-level user-agent injection
   7. HTTP/2 connection reuse (asserts single TCP dial across multiple requests)
   8. connection pool get/put, identity-aware removal, close, and concurrent access
+  9. uTLS through a CONNECT proxy (tunnel target, `Proxy-Authorization`, refused tunnel, ClientHello unchanged by the tunnel)
 
 ## Conventions Observed
 - Standard-library-first implementation with small API surface.

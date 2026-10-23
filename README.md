@@ -10,6 +10,7 @@ Features:
 - Option-based request customization (`WithUserAgent`).
 - Optional uTLS transport (`WithUTLS`) with Chrome ClientHello emulation by default.
 - HTTP/2 connection pooling for uTLS transport — connections are reused across requests.
+- Proxy support for uTLS transport — honours `HTTPS_PROXY`/`NO_PROXY` by default via an HTTP CONNECT tunnel.
 - Transport hooks via `transport.FuncTransport` (`BeforeReq` / `AfterReq`).
 
 Simple usage:
